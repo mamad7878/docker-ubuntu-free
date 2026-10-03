@@ -69,12 +69,14 @@ def load_config():
 
 CONFIG_DATA = load_config()
 
-BOT_TOKEN = CONFIG_DATA.get(
-    "TELEGRAM_BOT_TOKEN", ""
+BOT_TOKEN = os.getenv(
+    "TELEGRAM_BOT_TOKEN",
+    CONFIG_DATA.get("TELEGRAM_BOT_TOKEN", "")
 ).strip()
 
-CHAT_ID = CONFIG_DATA.get(
-    "TELEGRAM_CHAT_ID", ""
+CHAT_ID = os.getenv(
+    "TELEGRAM_CHAT_ID",
+    CONFIG_DATA.get("TELEGRAM_CHAT_ID", "")
 ).strip()
 
 
