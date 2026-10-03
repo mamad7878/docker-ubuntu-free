@@ -30,6 +30,7 @@ vncserver "$DISPLAY" \
     -localhost no \
     -SecurityTypes None \
     -geometry 1024x768 \
+    --I-KNOW-THIS-IS-INSECURE \
     >/tmp/vnc.log 2>&1 || {
         echo "❌ VNC start failed"
         cat /tmp/vnc.log
