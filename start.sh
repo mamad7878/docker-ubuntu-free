@@ -22,22 +22,24 @@ XSTART
 
 chmod +x /root/.vnc/xstartup
 
-echo "🖥️ Starting VNC..."
+echo "Starting VNC..."
 
 vncserver -kill "$DISPLAY" >/dev/null 2>&1 || true
 
 vncserver "$DISPLAY" \
     -localhost no \
     -SecurityTypes None \
-    -geometry 1024x768 \
     --I-KNOW-THIS-IS-INSECURE \
-    >/tmp/vnc.log 2>&1 || {
-        echo "❌ VNC start failed"
-        cat /tmp/vnc.log
-        exit 1
-    }
+    -geometry 1024x768 \
+    >/tmp/vnc.log 2>&1
 
-echo "✅ VNC started"
+if [ $? -ne 0 ]; then
+    echo "VNC start failed"
+    cat /tmp/vnc.log
+    exit 1
+fi
+
+echo "VNC started"
 
 NOVNC_PROXY=""
 
@@ -48,11 +50,11 @@ elif command -v novnc_proxy >/dev/null 2>&1; then
 fi
 
 if [ -z "$NOVNC_PROXY" ]; then
-    echo "❌ noVNC not found"
+    echo "noVNC not found"
     exit 1
 fi
 
-echo "🌐 Starting noVNC on port $PORT..."
+echo "Starting noVNC on port $PORT..."
 
 "$NOVNC_PROXY" \
     --vnc 127.0.0.1:5901 \
@@ -62,15 +64,14 @@ echo "🌐 Starting noVNC on port $PORT..."
 sleep 2
 
 if ! pgrep -f "novnc_proxy" >/dev/null 2>&1; then
-    echo "❌ noVNC failed"
+    echo "noVNC failed"
     cat /tmp/novnc.log
     exit 1
 fi
 
-echo "✅ noVNC started"
+echo "noVNC started"
 
-echo
-echo "🤖 Starting Crash Bot..."
+echo "Starting Crash Bot..."
 echo "======================================"
 
 exec python -u bot.py
