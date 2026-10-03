@@ -1,0 +1,7 @@
+config.env
+crash.db
+venv/
+__pycache__/
+*.pyc
+*.log
+.git/
