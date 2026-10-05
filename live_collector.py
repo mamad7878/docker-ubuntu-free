@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 API_URL = "https://playglobal8.com/api/game/bet/multi/history"
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE, "crash.db")
+DB_FILE = os.environ.get("CRASH_DB_PATH", "/data/crash.db")
 RECOVERY_FILE = os.path.join(BASE, "recovery_report.json")
 
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "2"))

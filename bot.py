@@ -29,7 +29,7 @@ import exact_analyzer
 
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(BASE, "crash.db")
+DB = os.environ.get("CRASH_DB_PATH", "/data/crash.db")
 CONFIG = os.path.join(BASE, "config.env")
 RECOVERY_FILE = os.path.join(BASE, "recovery_report.json")
 
