@@ -7,7 +7,7 @@ from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash.db")
+DB_PATH = os.environ.get("CRASH_DB_PATH", "/data/crash.db")
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.env")
 
 def load_config():
