@@ -26,6 +26,7 @@ from telegram.ext import (
 )
 
 import exact_analyzer
+import rule_b_signals as rule_b
 
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -370,6 +371,114 @@ async def send_recovery_report(application):
         )
 
 
+
+
+async def process_rule_b(application):
+    """Process experimental Rule B signals without blocking normal monitoring."""
+    signals_db = rule_b.SIGNALS_DB
+
+    try:
+        rule_b.reconcile(DB, signals_db)
+
+        latest_id = get_latest_id()
+        if latest_id is not None:
+            rule_b.create_signal(
+                latest_id,
+                crash_db=DB,
+                signals_db=signals_db
+            )
+
+        rule_b.reconcile(DB, signals_db)
+
+        # This function returns tuples, not dictionaries.
+        for target_id, trigger_id, rates_json in rule_b.get_unsent_signals(signals_db):
+            rates = json.loads(rates_json)
+            rates_text = "، ".join(f"{float(x):.2f}x" for x in rates)
+
+            # Reconcile again immediately before sending. If the target
+            # already arrived, it becomes "missed" and is no longer pending.
+            rule_b.reconcile(DB, signals_db)
+            pending_ids = {
+                int(row[0])
+                for row in rule_b.get_unsent_signals(signals_db)
+            }
+            if int(target_id) not in pending_ids:
+                continue
+
+            message = (
+                "🧪 سیگنال آزمایشی قانون B\n\n"
+                f"🎯 بازی هدف: {int(target_id)}\n"
+                f"🔎 بازی محرک: {int(trigger_id)}\n"
+                f"📊 پنج ضریب قبلی: {rates_text}\n"
+                "شرط: پنج بازی متوالی زیر 2x\n"
+                "هدف ارزیابی: بازی بعدی حداقل 1.5x\n\n"
+                "⚠️ آزمایشی است؛ تضمین برد نیست."
+            )
+
+            # Recheck immediately before attempting delivery.
+            if rule_b.target_exists(target_id, DB):
+                rule_b.reconcile(DB, signals_db)
+                continue
+
+            # Record the attempt time before the network call, so a result
+            # arriving during delivery is not automatically treated as late.
+            rule_b.mark_signal_sent(target_id, signals_db)
+
+            # Close the race if the target arrived between the first check
+            # and recording the send timestamp.
+            if rule_b.target_exists(target_id, DB):
+                rule_b.unmark_signal_sent(target_id, signals_db)
+                rule_b.reconcile(DB, signals_db)
+                continue
+
+            try:
+                await application.bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=message
+                )
+                print(f"[RULE B] Signal sent for target {target_id}")
+            except Exception as exc:
+                rule_b.unmark_signal_sent(target_id, signals_db)
+                rule_b.reconcile(DB, signals_db)
+                print("[RULE B SIGNAL SEND ERROR]", type(exc).__name__, exc)
+                break
+
+        rule_b.reconcile(DB, signals_db)
+
+        # This function also returns tuples.
+        for target_id, status, target_rate in rule_b.get_unsent_results(signals_db):
+            if status == "win":
+                result_text = (
+                    f"✅ نتیجه قانون B: برد\n"
+                    f"بازی {target_id}: {float(target_rate):.2f}x"
+                )
+            elif status == "loss":
+                result_text = (
+                    f"❌ نتیجه قانون B: باخت\n"
+                    f"بازی {target_id}: {float(target_rate):.2f}x"
+                )
+            elif status == "void":
+                result_text = (
+                    f"⚠️ نتیجه قانون B: بازی هدف {target_id} "
+                    "در داده‌ها پیدا نشد."
+                )
+            else:
+                continue
+
+            try:
+                await application.bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=result_text + "\n🧪 نتیجه آزمایشی است."
+                )
+                rule_b.mark_result_sent(target_id, signals_db)
+            except Exception as exc:
+                print("[RULE B RESULT SEND ERROR]", type(exc).__name__, exc)
+                break
+
+    except Exception as exc:
+        print("[RULE B PROCESS ERROR]", type(exc).__name__, exc)
+
+
 async def monitor_crash(application):
     last_id = get_latest_id()
 
@@ -384,6 +493,11 @@ async def monitor_crash(application):
     while True:
 
         try:
+            try:
+                await process_rule_b(application)
+            except Exception as rule_b_exc:
+                print('[RULE B MONITOR ERROR]', type(rule_b_exc).__name__, rule_b_exc)
+
             await send_recovery_report(
                 application
             )
@@ -1177,6 +1291,38 @@ async def analyze_cmd(update, context):
         )
 
 
+
+
+async def rule_b_cmd(update, context):
+    try:
+        stats = rule_b.get_stats(rule_b.SIGNALS_DB)
+        wins = int(stats.get("win", 0))
+        losses = int(stats.get("loss", 0))
+        pending = int(stats.get("pending", 0))
+        void = int(stats.get("void", 0))
+        missed = int(stats.get("missed", 0))
+        decided = wins + losses
+        win_rate = (100.0 * wins / decided) if decided else 0.0
+
+        message = (
+            "🧪 آمار قانون B (آزمایشی)\n\n"
+            "قانون: پنج بازی قبلی همگی زیر 2x\n"
+            "هدف: بازی بعدی حداقل 1.5x\n\n"
+            f"✅ برد: {wins}\n"
+            f"❌ باخت: {losses}\n"
+            f"📈 درصد برد: {win_rate:.2f}% ({wins}/{decided})\n"
+            f"⏳ در انتظار: {pending}\n"
+            f"⚠️ بازی ناموجود: {void}\n"
+            f"🚫 سیگنال ازدست‌رفته: {missed}\n\n"
+            "این آمار تضمین‌کننده نتیجه آینده نیست."
+        )
+    except Exception as exc:
+        print("[RULE B STATS ERROR]", type(exc).__name__, exc)
+        message = "خطا در خواندن آمار قانون B؛ لاگ ترمینال را بررسی کن."
+
+    await update.effective_message.reply_text(message)
+
+
 async def status_cmd(update, context):
     try:
         if not os.path.exists(DB):
@@ -1298,6 +1444,10 @@ def main():
 
     app.add_handler(
         CommandHandler("status", status_cmd)
+    )
+
+    app.add_handler(
+        CommandHandler("ruleb", rule_b_cmd)
     )
 
     app.add_handler(
