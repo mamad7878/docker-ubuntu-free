@@ -374,13 +374,14 @@ async def send_recovery_report(application):
 
 
 async def process_rule_b(application):
-    """Process experimental Rule B signals without blocking normal monitoring."""
+    """Process Rule B signals in target-game order and log delivery failures."""
     signals_db = rule_b.SIGNALS_DB
 
     try:
-        # Resolve older signals once, then check the newest trigger.
+        # Resolve signals whose target games are already recorded.
         rule_b.reconcile(DB, signals_db)
 
+        # Only the latest recorded game can trigger a timely next-game signal.
         latest_id = get_latest_id()
         if latest_id is not None:
             rule_b.create_signal(
@@ -389,52 +390,82 @@ async def process_rule_b(application):
                 signals_db=signals_db
             )
 
-        # This function returns tuples, not dictionaries.
+        # Send eligible signals in target order.
         for target_id, trigger_id, rates_json in rule_b.get_unsent_signals(signals_db):
-            rates = json.loads(rates_json)
-            rates_text = "، ".join(f"{float(x):.2f}x" for x in rates)
-
-            message = (
-                "🧪 سیگنال آزمایشی قانون B\n\n"
-                f"🎯 بازی هدف: {int(target_id)}\n"
-                f"🔎 بازی محرک: {int(trigger_id)}\n"
-                f"📊 پنج ضریب قبلی: {rates_text}\n"
-                "شرط: پنج بازی متوالی زیر 2x\n"
-                "هدف ارزیابی: بازی بعدی حداقل 1.5x\n\n"
-                "⚠️ آزمایشی است؛ تضمین برد نیست."
-            )
-
-            # Recheck immediately before attempting delivery.
-            if rule_b.target_exists(target_id, DB):
-                rule_b.reconcile(DB, signals_db)
-                continue
-
-            # Record the attempt time before the network call, so a result
-            # arriving during delivery is not automatically treated as late.
-            rule_b.mark_signal_sent(target_id, signals_db)
-
-            # Close the race if the target arrived between the first check
-            # and recording the send timestamp.
-            if rule_b.target_exists(target_id, DB):
-                rule_b.unmark_signal_sent(target_id, signals_db)
-                rule_b.reconcile(DB, signals_db)
-                continue
-
             try:
-                await application.bot.send_message(
-                    chat_id=CHAT_ID,
-                    text=message
+                if rule_b.target_exists(target_id, DB):
+                    rule_b.reconcile(DB, signals_db)
+                    print(f"[RULE B] Target {target_id} already recorded; signal skipped.")
+                    continue
+
+                rates = json.loads(rates_json)
+                rates_text = "، ".join(f"{float(x):.2f}x" for x in rates)
+
+                message = (
+                    "🧪 سیگنال آزمایشی قانون B\n\n"
+                    f"🎯 بازی هدف: {int(target_id)}\n"
+                    f"🔎 بازی محرک: {int(trigger_id)}\n"
+                    f"📊 پنج ضریب قبلی: {rates_text}\n"
+                    "شرط: پنج بازی متوالی زیر 2x\n"
+                    "هدف ارزیابی: بازی بعدی حداقل 1.5x\n\n"
+                    "⚠️ آزمایشی است؛ تضمین برد نیست."
                 )
-                print(f"[RULE B] Signal sent for target {target_id}")
+
+                # Check again immediately before sending.
+                if rule_b.target_exists(target_id, DB):
+                    rule_b.reconcile(DB, signals_db)
+                    print(f"[RULE B] Target {target_id} arrived before send.")
+                    continue
+
+                # Claim this signal before contacting Telegram.
+                if not rule_b.mark_signal_attempting(target_id, signals_db):
+                    print(f"[RULE B] Signal {target_id} is no longer eligible.")
+                    continue
+
+                try:
+                    await application.bot.send_message(
+                        chat_id=CHAT_ID,
+                        text=message
+                    )
+                    if not rule_b.mark_signal_sent(target_id, signals_db):
+                        print(
+                            "[RULE B DELIVERY STATE WARNING]",
+                            f"target={target_id}",
+                            "Telegram accepted the message but DB confirmation failed."
+                        )
+                    else:
+                        print(f"[RULE B] Signal sent for target {target_id}")
+
+                except Exception as exc:
+                    try:
+                        rule_b.mark_signal_unknown(target_id, signals_db)
+                    except Exception as state_exc:
+                        print(
+                            "[RULE B DELIVERY STATE ERROR]",
+                            f"target={target_id}",
+                            type(state_exc).__name__,
+                            str(state_exc)
+                        )
+
+                    print(
+                        "[RULE B SIGNAL DELIVERY UNKNOWN]",
+                        f"target={target_id}",
+                        type(exc).__name__,
+                        str(exc)
+                    )
+                    break
+
             except Exception as exc:
-                rule_b.unmark_signal_sent(target_id, signals_db)
-                rule_b.reconcile(DB, signals_db)
-                print("[RULE B SIGNAL SEND ERROR]", type(exc).__name__, exc)
-                break
+                print(
+                    "[RULE B SIGNAL PROCESS ERROR]",
+                    f"target={target_id}",
+                    type(exc).__name__,
+                    str(exc)
+                )
 
         rule_b.reconcile(DB, signals_db)
 
-        # This function also returns tuples.
+        # Send results for signals that were recorded as attempted/sent.
         for target_id, status, target_rate in rule_b.get_unsent_results(signals_db):
             if status == "win":
                 result_text = (
@@ -461,12 +492,16 @@ async def process_rule_b(application):
                 )
                 rule_b.mark_result_sent(target_id, signals_db)
             except Exception as exc:
-                print("[RULE B RESULT SEND ERROR]", type(exc).__name__, exc)
+                print(
+                    "[RULE B RESULT SEND ERROR]",
+                    f"target={target_id}",
+                    type(exc).__name__,
+                    str(exc)
+                )
                 break
 
     except Exception as exc:
         print("[RULE B PROCESS ERROR]", type(exc).__name__, exc)
-
 
 async def monitor_crash(application):
     last_id = get_latest_id()

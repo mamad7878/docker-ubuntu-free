@@ -21,6 +21,7 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+
 def connect_signals(path=None):
     path = path or SIGNALS_DB
     conn = sqlite3.connect(path, timeout=10)
@@ -36,8 +37,53 @@ def connect_signals(path=None):
             created_at TEXT NOT NULL,
             resolved_at TEXT,
             signal_sent_at TEXT,
-            result_sent_at TEXT
+            result_sent_at TEXT,
+            delivery_status TEXT NOT NULL DEFAULT 'pending',
+            delivery_attempted_at TEXT
         )
+    """)
+
+    columns = {
+        row[1] for row in conn.execute(
+            "PRAGMA table_info(rule_b_signals)"
+        )
+    }
+
+    if "delivery_status" not in columns:
+        conn.execute("""
+            ALTER TABLE rule_b_signals
+            ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'pending'
+        """)
+
+    if "delivery_attempted_at" not in columns:
+        conn.execute("""
+            ALTER TABLE rule_b_signals
+            ADD COLUMN delivery_attempted_at TEXT
+        """)
+
+    # Preserve settled historical records conservatively.
+    conn.execute("""
+        UPDATE rule_b_signals
+        SET delivery_status = 'unknown'
+        WHERE delivery_status = 'pending'
+          AND status IN ('win', 'loss', 'void')
+          AND signal_sent_at IS NOT NULL
+    """)
+
+    conn.execute("""
+        UPDATE rule_b_signals
+        SET delivery_status = 'missed'
+        WHERE delivery_status = 'pending'
+          AND status = 'missed'
+    """)
+
+    # An old timestamp on an unresolved record does not prove delivery.
+    conn.execute("""
+        UPDATE rule_b_signals
+        SET delivery_status = 'unknown'
+        WHERE delivery_status = 'pending'
+          AND status = 'pending'
+          AND signal_sent_at IS NOT NULL
     """)
 
     conn.execute("""
@@ -47,7 +93,6 @@ def connect_signals(path=None):
 
     conn.commit()
     return conn
-
 
 def get_previous_five(crash_db, trigger_id):
     conn = sqlite3.connect(crash_db, timeout=10)
@@ -147,8 +192,9 @@ def create_signal(trigger_id, crash_db=None, signals_db=None):
         conn.close()
 
 
+
 def reconcile(crash_db=None, signals_db=None):
-    """Resolve only signals that were actually sent; mark late unsent ones missed."""
+    """Resolve outcomes without treating uncertain delivery as a sent signal."""
     crash_db = crash_db or CRASH_DB
     signals_db = signals_db or SIGNALS_DB
 
@@ -164,27 +210,50 @@ def reconcile(crash_db=None, signals_db=None):
         conn = connect_signals(signals_db)
         try:
             pending = conn.execute("""
-                SELECT target_game_id, signal_sent_at
+                SELECT target_game_id, signal_sent_at,
+                       delivery_status, delivery_attempted_at
                 FROM rule_b_signals
                 WHERE status = 'pending'
             """).fetchall()
 
-            for target_id, signal_sent_at in pending:
+            for target_id, sent_at, delivery, attempted_at in pending:
+                # Give an in-flight Telegram request up to 120 seconds.
+                if delivery == "attempting":
+                    stale = True
+                    if attempted_at:
+                        try:
+                            started = datetime.fromisoformat(attempted_at)
+                            age = (
+                                datetime.now(timezone.utc) - started
+                            ).total_seconds()
+                            stale = age > 120
+                        except (ValueError, TypeError):
+                            stale = True
+
+                    if not stale:
+                        continue
+
+                    delivery = "unknown"
+                    conn.execute("""
+                        UPDATE rule_b_signals
+                        SET delivery_status = 'unknown'
+                        WHERE target_game_id = ?
+                          AND status = 'pending'
+                    """, (target_id,))
+
                 row = source.execute("""
-                    SELECT rate
-                    FROM crashes
-                    WHERE game_id = ?
+                    SELECT rate FROM crashes WHERE game_id = ?
                 """, (target_id,)).fetchone()
 
                 if row is not None:
                     rate = float(row[0])
 
-                    # If the target arrived before the signal was sent,
-                    # it is not a valid signal and must not count as a result.
-                    if signal_sent_at is None:
-                        status = "missed"
-                    else:
+                    if delivery == "sent":
                         status = "win" if rate >= TARGET_RATE else "loss"
+                    elif delivery == "unknown":
+                        status = "delivery_unknown"
+                    else:
+                        status = "missed"
 
                     conn.execute("""
                         UPDATE rule_b_signals
@@ -196,7 +265,12 @@ def reconcile(crash_db=None, signals_db=None):
                     """, (status, rate, now(), target_id))
 
                 elif int(latest) > int(target_id):
-                    status = "void" if signal_sent_at is not None else "missed"
+                    if delivery == "sent":
+                        status = "void"
+                    elif delivery == "unknown":
+                        status = "delivery_unknown"
+                    else:
+                        status = "missed"
 
                     conn.execute("""
                         UPDATE rule_b_signals
@@ -263,21 +337,20 @@ def get_streak_stats(signals_db=None):
     }
 
 
+
 def get_unsent_signals(signals_db=None):
     conn = connect_signals(signals_db)
-
     try:
         return conn.execute("""
             SELECT target_game_id, trigger_game_id, previous_rates
             FROM rule_b_signals
             WHERE status = 'pending'
+              AND delivery_status = 'pending'
               AND signal_sent_at IS NULL
             ORDER BY target_game_id
         """).fetchall()
     finally:
         conn.close()
-
-
 
 def target_exists(target_id, crash_db=None):
     """Check whether the target result has already entered the crash DB."""
@@ -292,36 +365,78 @@ def target_exists(target_id, crash_db=None):
         conn.close()
 
 
+
 def mark_signal_sent(target_id, signals_db=None):
+    """Record delivery only after Telegram confirms a successful send."""
     conn = connect_signals(signals_db)
     try:
-        conn.execute("""
+        cur = conn.execute("""
             UPDATE rule_b_signals
-            SET signal_sent_at = ?
+            SET signal_sent_at = ?,
+                delivery_status = 'sent'
             WHERE target_game_id = ?
               AND status = 'pending'
+              AND delivery_status = 'attempting'
               AND signal_sent_at IS NULL
         """, (now(), int(target_id)))
         conn.commit()
+        return cur.rowcount == 1
     finally:
         conn.close()
 
 
-
 def unmark_signal_sent(target_id, signals_db=None):
-    """Undo the send timestamp if Telegram delivery fails."""
+    """Reset only a signal that has not been sent or attempted."""
     conn = connect_signals(signals_db)
     try:
         conn.execute("""
             UPDATE rule_b_signals
-            SET signal_sent_at = NULL
+            SET signal_sent_at = NULL,
+                delivery_status = 'pending',
+                delivery_attempted_at = NULL
             WHERE target_game_id = ?
               AND status = 'pending'
+              AND delivery_status = 'pending'
         """, (int(target_id),))
         conn.commit()
     finally:
         conn.close()
 
+
+def mark_signal_attempting(target_id, signals_db=None):
+    conn = connect_signals(signals_db)
+    try:
+        cur = conn.execute("""
+            UPDATE rule_b_signals
+            SET delivery_status = 'attempting',
+                delivery_attempted_at = ?
+            WHERE target_game_id = ?
+              AND status = 'pending'
+              AND delivery_status = 'pending'
+              AND signal_sent_at IS NULL
+        """, (now(), int(target_id)))
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
+def mark_signal_unknown(target_id, signals_db=None):
+    """Do not automatically retry an ambiguous Telegram delivery."""
+    conn = connect_signals(signals_db)
+    try:
+        cur = conn.execute("""
+            UPDATE rule_b_signals
+            SET delivery_status = 'unknown'
+            WHERE target_game_id = ?
+              AND status = 'pending'
+              AND delivery_status = 'attempting'
+              AND signal_sent_at IS NULL
+        """, (int(target_id),))
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
 
 def get_unsent_results(signals_db=None):
     conn = connect_signals(signals_db)
@@ -332,12 +447,12 @@ def get_unsent_results(signals_db=None):
             FROM rule_b_signals
             WHERE status IN ('win', 'loss', 'void')
               AND signal_sent_at IS NOT NULL
+              AND delivery_status = 'sent'
               AND result_sent_at IS NULL
             ORDER BY target_game_id
         """).fetchall()
     finally:
         conn.close()
-
 
 def mark_result_sent(target_id, signals_db=None):
     conn = connect_signals(signals_db)
