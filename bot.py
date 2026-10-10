@@ -34,7 +34,7 @@ DB = os.environ.get("CRASH_DB_PATH", "/data/crash.db")
 CONFIG = os.path.join(BASE, "config.env")
 RECOVERY_FILE = os.path.join(BASE, "recovery_report.json")
 
-INTERVAL = 3
+INTERVAL = 1
 
 monitor_task = None
 collector_process = None
@@ -378,6 +378,7 @@ async def process_rule_b(application):
     signals_db = rule_b.SIGNALS_DB
 
     try:
+        # Resolve older signals once, then check the newest trigger.
         rule_b.reconcile(DB, signals_db)
 
         latest_id = get_latest_id()
@@ -388,22 +389,10 @@ async def process_rule_b(application):
                 signals_db=signals_db
             )
 
-        rule_b.reconcile(DB, signals_db)
-
         # This function returns tuples, not dictionaries.
         for target_id, trigger_id, rates_json in rule_b.get_unsent_signals(signals_db):
             rates = json.loads(rates_json)
             rates_text = "، ".join(f"{float(x):.2f}x" for x in rates)
-
-            # Reconcile again immediately before sending. If the target
-            # already arrived, it becomes "missed" and is no longer pending.
-            rule_b.reconcile(DB, signals_db)
-            pending_ids = {
-                int(row[0])
-                for row in rule_b.get_unsent_signals(signals_db)
-            }
-            if int(target_id) not in pending_ids:
-                continue
 
             message = (
                 "🧪 سیگنال آزمایشی قانون B\n\n"

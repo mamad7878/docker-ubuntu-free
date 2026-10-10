@@ -11,7 +11,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.environ.get("CRASH_DB_PATH", "/data/crash.db")
 RECOVERY_FILE = os.path.join(BASE, "recovery_report.json")
 
-POLL_SECONDS = float(os.getenv("POLL_SECONDS", "2"))
+POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1"))
 RETRY_SECONDS = float(os.getenv("RETRY_SECONDS", "5"))
 MAX_RECOVERY_PAGES = int(os.getenv("MAX_RECOVERY_PAGES", "10"))
 
