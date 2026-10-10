@@ -1296,6 +1296,8 @@ async def analyze_cmd(update, context):
 async def rule_b_cmd(update, context):
     try:
         stats = rule_b.get_stats(rule_b.SIGNALS_DB)
+        streaks = rule_b.get_streak_stats(rule_b.SIGNALS_DB)
+
         wins = int(stats.get("win", 0))
         losses = int(stats.get("loss", 0))
         pending = int(stats.get("pending", 0))
@@ -1314,6 +1316,10 @@ async def rule_b_cmd(update, context):
             f"⏳ در انتظار: {pending}\n"
             f"⚠️ بازی ناموجود: {void}\n"
             f"🚫 سیگنال ازدست‌رفته: {missed}\n\n"
+            f"🔥 بیشترین برد متوالی: {streaks['max_win_streak']}\n"
+            f"🧊 بیشترین باخت متوالی: {streaks['max_loss_streak']}\n"
+            f"✅ برد متوالی فعلی: {streaks['current_win_streak']}\n"
+            f"❌ باخت متوالی فعلی: {streaks['current_loss_streak']}\n\n"
             "این آمار تضمین‌کننده نتیجه آینده نیست."
         )
     except Exception as exc:
@@ -1321,7 +1327,6 @@ async def rule_b_cmd(update, context):
         message = "خطا در خواندن آمار قانون B؛ لاگ ترمینال را بررسی کن."
 
     await update.effective_message.reply_text(message)
-
 
 async def status_cmd(update, context):
     try:

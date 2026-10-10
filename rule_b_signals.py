@@ -228,6 +228,41 @@ def get_stats(signals_db=None):
         conn.close()
 
 
+
+def get_streak_stats(signals_db=None):
+    """Calculate historical and current win/loss streaks from settled signals."""
+    conn = connect_signals(signals_db)
+    try:
+        rows = conn.execute("""
+            SELECT target_game_id, status
+            FROM rule_b_signals
+            WHERE status IN ('win', 'loss')
+            ORDER BY target_game_id
+        """).fetchall()
+    finally:
+        conn.close()
+
+    max_win = max_loss = 0
+    current_win = current_loss = 0
+
+    for _, status in rows:
+        if status == "win":
+            current_win += 1
+            current_loss = 0
+            max_win = max(max_win, current_win)
+        else:
+            current_loss += 1
+            current_win = 0
+            max_loss = max(max_loss, current_loss)
+
+    return {
+        "max_win_streak": max_win,
+        "max_loss_streak": max_loss,
+        "current_win_streak": current_win,
+        "current_loss_streak": current_loss,
+    }
+
+
 def get_unsent_signals(signals_db=None):
     conn = connect_signals(signals_db)
 
