@@ -24,7 +24,7 @@ def load_config():
 
 CONFIG = load_config()
 BOT_TOKEN = CONFIG.get("TELEGRAM_BOT_TOKEN", "").strip()
-SAMPLE_COUNT = 10
+DISPLAY_COUNT = 10
 TARGETS = (1.20, 1.50, 1.70, 2.00, 3.00)
 
 
@@ -56,8 +56,6 @@ def analyze():
         if q2(rows[i][1]) == target:
             if i + 1 < len(rows):
                 matches.append((rows[i], rows[i + 1]))
-                if len(matches) >= SAMPLE_COUNT:
-                    break
 
     return rows, latest_id, latest_mult, matches
 
@@ -65,6 +63,9 @@ def analyze():
 def make_report():
     rows, latest_id, latest_mult, matches = analyze()
     target = q2(latest_mult)
+    total_occurrences = sum(
+        1 for _, rate in rows if q2(rate) == target
+    )
 
     out = [
         "🎯 Crash Exact Analyzer",
@@ -73,7 +74,7 @@ def make_report():
         f"ضریب فعلی: {target:.2f}x",
         "",
         "━━━━━━━━━━━━━━━━━━",
-        f"📚 ۱۰ مورد قبلی دقیقاً {target:.2f}x",
+        f"📚 ۱۰ نمونهٔ آخر با ضریب دقیقاً {target:.2f}x",
         "━━━━━━━━━━━━━━━━━━",
     ]
 
@@ -82,7 +83,7 @@ def make_report():
         out.append(f"تعداد نمونه موجود: 0")
         return "\n".join(out)
 
-    for n, (ref, nxt) in enumerate(matches, 1):
+    for n, (ref, nxt) in enumerate(matches[:DISPLAY_COUNT], 1):
         ref_id, ref_mult = ref
         next_id, next_mult = nxt
         out.append(
@@ -97,7 +98,9 @@ def make_report():
         "━━━━━━━━━━━━━━━━━━",
         "📊 آمار راند بلافاصله بعد",
         "━━━━━━━━━━━━━━━━━━",
-        f"نمونه استفاده‌شده: {n}",
+        f"🔎 تعداد کل دفعات کشف ضریب {target:.2f}x: {total_occurrences:,}",
+        f"📈 کل نمونه‌های استفاده‌شده در محاسبه: {n:,}",
+        f"👁 نمونه‌های نمایش‌داده‌شده: {min(len(matches), DISPLAY_COUNT)}",
     ]
 
     for t in TARGETS:
