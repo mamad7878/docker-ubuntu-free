@@ -439,9 +439,33 @@ def mark_signal_unknown(target_id, signals_db=None):
         conn.close()
 
 def get_unsent_results(signals_db=None):
-    conn = connect_signals(signals_db)
+    """Return pending result notifications, suppressing results for games
+    that also triggered a later Rule B signal that was successfully sent.
+    """
+    from datetime import datetime, timezone
 
+    conn = connect_signals(signals_db)
     try:
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Suppress only notifications; preserve the actual win/loss statuses.
+        conn.execute("""
+            UPDATE rule_b_signals AS old
+            SET result_sent_at = ?
+            WHERE old.result_sent_at IS NULL
+              AND old.status IN ('win', 'loss', 'void')
+              AND old.signal_sent_at IS NOT NULL
+              AND old.delivery_status = 'sent'
+              AND EXISTS (
+                  SELECT 1
+                  FROM rule_b_signals AS nxt
+                  WHERE nxt.trigger_game_id = old.target_game_id
+                    AND nxt.signal_sent_at IS NOT NULL
+                    AND nxt.delivery_status = 'sent'
+              )
+        """, (now,))
+        conn.commit()
+
         return conn.execute("""
             SELECT target_game_id, status, target_rate
             FROM rule_b_signals
