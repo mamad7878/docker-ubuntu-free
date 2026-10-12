@@ -1359,7 +1359,7 @@ async def paper_betting_cmd(update, context):
             "🎯 هدف: حداقل 2.00x\n"
             "📊 شرط فقط در احتمال تاریخی 60٪ و بالاتر\n"
             f"💰 سرمایه اولیه: {stats['initial']:,} تومان\n"
-            f"💵 مبلغ هر شرط: {stats['stake']:,} تومان\n"
+            f"💵 مبلغ شرط بعدی: {stats['stake']:,} تومان\n"
             f"🏦 موجودی آزاد: {stats['bankroll']:,} تومان\n"
             f"📈 سود/زیان شرط‌های تسویه‌شده: "
             f"{stats['profit']:+,} تومان\n\n"
