@@ -369,7 +369,10 @@ def get_stats():
             WHERE status IN ('win', 'loss')
         """).fetchone()[0]
 
-        initial, bankroll, stake = map(int, state)
+        initial, bankroll, _stored_stake = map(int, state)
+        # مبلغ شرط بعدی همیشه ۲ درصد موجودی فعلی است.
+        stake = int(bankroll * STAKE_PERCENT)
+
         wins = int(counts.get("win", 0))
         losses = int(counts.get("loss", 0))
         pending = int(counts.get("pending", 0))
