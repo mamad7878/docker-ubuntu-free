@@ -27,6 +27,7 @@ from telegram.ext import (
 
 import exact_analyzer
 import rule_b_signals as rule_b
+import paper_betting
 
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -87,6 +88,7 @@ def main_keyboard():
             ["📜 تاریخچه ضرایب", "📊 وضعیت"],
             ["🔍 تحلیل", "▶️ شروع"],
             ["📈 تحلیل آماری"],
+            ["🧪 شبیه‌ساز مجازی"],
             ["🔧 شکاف‌های دیتابیس"],
             ["🗑 پاک کردن تاریخچه"],
         ],
@@ -521,6 +523,37 @@ async def monitor_crash(application):
                 await process_rule_b(application)
             except Exception as rule_b_exc:
                 print('[RULE B MONITOR ERROR]', type(rule_b_exc).__name__, rule_b_exc)
+
+            # Virtual-only simulator: settle due bets, then evaluate the
+            # latest game for a possible bet on the next game.
+            try:
+                paper_betting.process_tick(DB)
+
+                for notification_id, paper_message in (
+                    paper_betting.get_unsent_notifications()
+                ):
+                    try:
+                        await application.bot.send_message(
+                            chat_id=CHAT_ID,
+                            text=paper_message
+                        )
+                        paper_betting.mark_notification_sent(
+                            notification_id
+                        )
+                    except Exception as paper_send_exc:
+                        print(
+                            "[PAPER BETTING NOTIFICATION ERROR]",
+                            type(paper_send_exc).__name__,
+                            paper_send_exc
+                        )
+                        break
+
+            except Exception as paper_exc:
+                print(
+                    "[PAPER BETTING ERROR]",
+                    type(paper_exc).__name__,
+                    paper_exc
+                )
 
             await send_recovery_report(
                 application
@@ -1317,6 +1350,43 @@ async def analyze_cmd(update, context):
 
 
 
+async def paper_betting_cmd(update, context):
+    try:
+        stats = paper_betting.get_stats()
+
+        message = (
+            "🧪 آمار شبیه‌ساز شرط‌بندی مجازی\n\n"
+            "🎯 هدف: حداقل 2.00x\n"
+            "📊 شرط فقط در احتمال تاریخی 60٪ و بالاتر\n"
+            f"💰 سرمایه اولیه: {stats['initial']:,} تومان\n"
+            f"💵 مبلغ هر شرط: {stats['stake']:,} تومان\n"
+            f"🏦 موجودی آزاد: {stats['bankroll']:,} تومان\n"
+            f"📈 سود/زیان شرط‌های تسویه‌شده: "
+            f"{stats['profit']:+,} تومان\n\n"
+            f"✅ برد: {stats['wins']}\n"
+            f"❌ باخت: {stats['losses']}\n"
+            f"📊 درصد برد: {stats['win_rate']:.2f}% "
+            f"({stats['wins']}/{stats['decided']})\n"
+            f"⏳ در انتظار نتیجه: {stats['pending']}\n"
+            f"⚠️ لغوشده: {stats['void']}\n\n"
+            "این شبیه‌ساز کاملاً مجازی است؛ "
+            "درصد تاریخی نتیجه آینده را تضمین نمی‌کند."
+        )
+
+    except Exception as exc:
+        print(
+            "[PAPER BETTING STATS ERROR]",
+            type(exc).__name__,
+            exc
+        )
+        message = "❌ خطا در خواندن آمار شبیه‌ساز مجازی؛ لاگ ربات را بررسی کن."
+
+    await update.effective_message.reply_text(
+        message,
+        reply_markup=main_keyboard()
+    )
+
+
 async def rule_b_cmd(update, context):
     try:
         stats = rule_b.get_stats(rule_b.SIGNALS_DB)
@@ -1426,6 +1496,9 @@ async def button_router(update, context):
 
     elif text == "📈 تحلیل آماری":
         await stats_analysis_cmd(update, context)
+
+    elif text == "🧪 شبیه‌ساز مجازی":
+        await paper_betting_cmd(update, context)
 
     elif text == "🔧 شکاف‌های دیتابیس":
         await recovery_status_cmd(update, context)
