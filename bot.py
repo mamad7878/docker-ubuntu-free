@@ -87,7 +87,7 @@ def main_keyboard():
         [
             ["📜 تاریخچه ضرایب", "📊 وضعیت"],
             ["🔍 تحلیل", "▶️ شروع"],
-            ["📈 تحلیل آماری"],
+            ["🧪 قانون B"],
             ["🧪 شبیه‌ساز مجازی"],
             ["🔧 شکاف‌های دیتابیس"],
             ["🗑 پاک کردن تاریخچه"],
@@ -1494,8 +1494,8 @@ async def button_router(update, context):
     elif text == "▶️ شروع":
         await start(update, context)
 
-    elif text == "📈 تحلیل آماری":
-        await stats_analysis_cmd(update, context)
+    elif text == "🧪 قانون B":
+        await rule_b_cmd(update, context)
 
     elif text == "🧪 شبیه‌ساز مجازی":
         await paper_betting_cmd(update, context)
