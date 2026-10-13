@@ -18,8 +18,8 @@ PAPER_DB = os.environ.get(
 
 INITIAL_BANKROLL = 1_000_000
 STAKE_PERCENT = 0.02
-TARGET = 2.00
-MIN_PROBABILITY = 60.0
+TARGET = 1.50
+MIN_PROBABILITY = 67.0
 
 
 def q2(value):
@@ -205,14 +205,14 @@ def process_tick(crash_db=None):
 
             if won:
                 # Stake was deducted when the bet was placed.
-                # Return stake + winnings (2x payout).
+                # Return stake plus winnings at the configured target.
                 con.execute("""
                     UPDATE paper_state
                     SET bankroll = bankroll + ?
                     WHERE id = 1
-                """, (2 * stake,))
+                """, (int(stake * TARGET),))
                 status = "win"
-                profit = stake
+                profit = int(stake * (TARGET - 1))
             else:
                 status = "loss"
                 profit = -stake
