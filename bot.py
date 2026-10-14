@@ -1021,12 +1021,6 @@ async def manual_data_handler(update, context):
     )
 
     if not records:
-        await update.message.reply_text(
-            "❌ هیچ رکورد قابل تشخیصی پیدا نشد.\n\n"
-            "مثال:\n"
-            "9665701 1.24\n"
-            "9665702 3.51"
-        )
         return
 
     missing = set(get_missing())
