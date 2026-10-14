@@ -9,6 +9,7 @@ import re
 import sys
 import subprocess
 import signal
+from datetime import datetime
 
 from telegram import (
     Update,
@@ -340,39 +341,76 @@ async def send_recovery_report(application):
     if not report:
         return
 
-    try:
-        message = make_recovery_message(
-            report
-        )
+    # وضعیت ارسال روی volume پایدار Railway ذخیره می‌شود.
+    # در محیط محلی، اگر /data قابل نوشتن نباشد، از پوشه پروژه استفاده می‌کنیم.
+    preferred_dir = os.path.dirname(DB) if "DB" in globals() else ""
+    if preferred_dir and os.path.isdir(preferred_dir) and os.access(preferred_dir, os.W_OK):
+        state_dir = preferred_dir
+    else:
+        state_dir = BASE
 
-        missing = report.get(
-            "missing",
-            []
-        )
+    state_path = os.path.join(state_dir, "recovery_report_sent.json")
+
+    try:
+        missing = sorted({
+            int(x) for x in report.get("missing", [])
+        })
+
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                previous_state = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            previous_state = {}
+
+        previous_missing = previous_state.get("missing")
+        if previous_missing is not None:
+            try:
+                previous_missing = sorted({
+                    int(x) for x in previous_missing
+                })
+            except (TypeError, ValueError):
+                previous_missing = None
+
+        # گزارش فقط زمانی تکراری است که فهرست شناسه‌های گمشده تغییر نکرده باشد.
+        if previous_missing == missing:
+            print(
+                "[RECOVERY] Duplicate report suppressed; "
+                f"{len(missing)} unresolved IDs unchanged."
+            )
+            clear_recovery_report()
+            return
+
+        message = make_recovery_message(report)
 
         await application.bot.send_message(
             chat_id=CHAT_ID,
             text=message,
-            reply_markup=(
-                recovery_keyboard()
-                if missing
-                else None
+            reply_markup=recovery_keyboard() if missing else None
+        )
+
+        # وضعیت فقط پس از ارسال موفق ثبت می‌شود.
+        tmp_path = state_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "missing": missing,
+                    "sent_at": datetime.now().isoformat()
+                },
+                f,
+                ensure_ascii=False,
+                indent=2
             )
-        )
 
-        print(
-            "📨 Recovery report sent to Telegram"
-        )
-
+        os.replace(tmp_path, state_path)
         clear_recovery_report()
 
-    except Exception as e:
         print(
-            "[RECOVERY TELEGRAM ERROR]",
-            e
+            "[RECOVERY] Report sent successfully; "
+            f"{len(missing)} unresolved IDs."
         )
 
-
+    except Exception as e:
+        print("[RECOVERY TELEGRAM ERROR]", type(e).__name__, e)
 
 
 async def process_rule_b(application):
