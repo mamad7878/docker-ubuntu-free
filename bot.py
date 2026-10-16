@@ -28,7 +28,7 @@ from telegram.ext import (
 
 import exact_analyzer
 import rule_b_signals as rule_b
-import paper_betting
+import threshold_69_paper
 
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -89,7 +89,7 @@ def main_keyboard():
             ["📜 تاریخچه ضرایب", "📊 وضعیت"],
             ["🔍 تحلیل", "▶️ شروع"],
             ["🧪 قانون B"],
-            ["🧪 شبیه‌ساز مجازی"],
+            ["🧪 استراتژی مجازی 6.9x"],
             ["🔧 شکاف‌های دیتابیس"],
             ["🗑 پاک کردن تاریخچه"],
         ],
@@ -562,35 +562,35 @@ async def monitor_crash(application):
             except Exception as rule_b_exc:
                 print('[RULE B MONITOR ERROR]', type(rule_b_exc).__name__, rule_b_exc)
 
-            # Virtual-only simulator: settle due bets, then evaluate the
-            # latest game for a possible bet on the next game.
+            # Independent virtual-only 6.9x strategy.
+            # Notifications remain queued until Telegram confirms delivery.
             try:
-                paper_betting.process_tick(DB)
+                threshold_69_paper.process_tick(DB)
 
-                for notification_id, paper_message in (
-                    paper_betting.get_unsent_notifications()
+                for notification_id, strategy_message in (
+                    threshold_69_paper.get_unsent_notifications()
                 ):
                     try:
                         await application.bot.send_message(
                             chat_id=CHAT_ID,
-                            text=paper_message
+                            text=strategy_message
                         )
-                        paper_betting.mark_notification_sent(
+                        threshold_69_paper.mark_notification_sent(
                             notification_id
                         )
-                    except Exception as paper_send_exc:
+                    except Exception as strategy_send_exc:
                         print(
-                            "[PAPER BETTING NOTIFICATION ERROR]",
-                            type(paper_send_exc).__name__,
-                            paper_send_exc
+                            "[STRATEGY 6.9 NOTIFICATION ERROR]",
+                            type(strategy_send_exc).__name__,
+                            strategy_send_exc
                         )
                         break
 
-            except Exception as paper_exc:
+            except Exception as strategy_exc:
                 print(
-                    "[PAPER BETTING ERROR]",
-                    type(paper_exc).__name__,
-                    paper_exc
+                    "[STRATEGY 6.9 ERROR]",
+                    type(strategy_exc).__name__,
+                    strategy_exc
                 )
 
             await send_recovery_report(
@@ -1382,36 +1382,19 @@ async def analyze_cmd(update, context):
 
 
 
-async def paper_betting_cmd(update, context):
+async def strategy69_cmd(update, context):
     try:
-        stats = paper_betting.get_stats()
-
-        message = (
-            "🧪 آمار شبیه‌ساز شرط‌بندی مجازی\n\n"
-            "🎯 هدف: حداقل 1.50x\n"
-            "📊 شرط فقط در احتمال تاریخی 67٪ و بالاتر\n"
-            f"💰 سرمایه اولیه: {stats['initial']:,} تومان\n"
-            f"💵 مبلغ شرط بعدی: {stats['stake']:,} تومان\n"
-            f"🏦 موجودی آزاد: {stats['bankroll']:,} تومان\n"
-            f"📈 سود/زیان شرط‌های تسویه‌شده: "
-            f"{stats['profit']:+,} تومان\n\n"
-            f"✅ برد: {stats['wins']}\n"
-            f"❌ باخت: {stats['losses']}\n"
-            f"📊 درصد برد: {stats['win_rate']:.2f}% "
-            f"({stats['wins']}/{stats['decided']})\n"
-            f"⏳ در انتظار نتیجه: {stats['pending']}\n"
-            f"⚠️ لغوشده: {stats['void']}\n\n"
-            "این شبیه‌ساز کاملاً مجازی است؛ "
-            "درصد تاریخی نتیجه آینده را تضمین نمی‌کند."
-        )
-
+        message = threshold_69_paper.start_or_status(DB)
     except Exception as exc:
         print(
-            "[PAPER BETTING STATS ERROR]",
+            "[STRATEGY 6.9 STATUS ERROR]",
             type(exc).__name__,
             exc
         )
-        message = "❌ خطا در خواندن آمار شبیه‌ساز مجازی؛ لاگ ربات را بررسی کن."
+        message = (
+            "❌ خطا در راه‌اندازی یا خواندن استراتژی مجازی 6.9x.\n"
+            "لاگ ربات را بررسی کن."
+        )
 
     await update.effective_message.reply_text(
         message,
@@ -1529,8 +1512,8 @@ async def button_router(update, context):
     elif text == "🧪 قانون B":
         await rule_b_cmd(update, context)
 
-    elif text == "🧪 شبیه‌ساز مجازی":
-        await paper_betting_cmd(update, context)
+    elif text == "🧪 استراتژی مجازی 6.9x":
+        await strategy69_cmd(update, context)
 
     elif text == "🔧 شکاف‌های دیتابیس":
         await recovery_status_cmd(update, context)
