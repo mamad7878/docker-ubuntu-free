@@ -29,6 +29,7 @@ from telegram.ext import (
 import exact_analyzer
 import rule_b_signals as rule_b
 import threshold_69_paper
+import strategy_15_paper
 
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -88,7 +89,7 @@ def main_keyboard():
         [
             ["📜 تاریخچه ضرایب", "📊 وضعیت"],
             ["🔍 تحلیل", "▶️ شروع"],
-            ["🧪 قانون B"],
+            ["🧪 استراتژی ۱٫۵"],
             ["🧪 استراتژی مجازی 6.9x"],
             ["🔧 شکاف‌های دیتابیس"],
             ["🗑 پاک کردن تاریخچه"],
@@ -591,6 +592,37 @@ async def monitor_crash(application):
                     "[STRATEGY 6.9 ERROR]",
                     type(strategy_exc).__name__,
                     strategy_exc
+                )
+
+            # Independent virtual-only Strategy 1.5.
+            # Uses only settled, confirmed Rule A signals.
+            try:
+                strategy_15_paper.process_tick(DB)
+
+                for notification_id, strategy_message in (
+                    strategy_15_paper.get_unsent_notifications()
+                ):
+                    try:
+                        await application.bot.send_message(
+                            chat_id=CHAT_ID,
+                            text=strategy_message
+                        )
+                        strategy_15_paper.mark_notification_sent(
+                            notification_id
+                        )
+                    except Exception as strategy15_send_exc:
+                        print(
+                            "[STRATEGY 1.5 NOTIFICATION ERROR]",
+                            type(strategy15_send_exc).__name__,
+                            strategy15_send_exc
+                        )
+                        break
+
+            except Exception as strategy15_exc:
+                print(
+                    "[STRATEGY 1.5 ERROR]",
+                    type(strategy15_exc).__name__,
+                    strategy15_exc
                 )
 
             await send_recovery_report(
@@ -1382,6 +1414,26 @@ async def analyze_cmd(update, context):
 
 
 
+async def strategy15_cmd(update, context):
+    try:
+        message = strategy_15_paper.start_or_status(DB)
+    except Exception as exc:
+        print(
+            "[STRATEGY 1.5 STATUS ERROR]",
+            type(exc).__name__,
+            exc
+        )
+        message = (
+            "❌ خطا در راه‌اندازی یا خواندن استراتژی مجازی 1.5.\\n"
+            "لاگ ربات را بررسی کن."
+        )
+
+    await update.effective_message.reply_text(
+        message,
+        reply_markup=main_keyboard()
+    )
+
+
 async def strategy69_cmd(update, context):
     try:
         message = threshold_69_paper.start_or_status(DB)
@@ -1509,8 +1561,8 @@ async def button_router(update, context):
     elif text == "▶️ شروع":
         await start(update, context)
 
-    elif text == "🧪 قانون B":
-        await rule_b_cmd(update, context)
+    elif text == "🧪 استراتژی ۱٫۵":
+        await strategy15_cmd(update, context)
 
     elif text == "🧪 استراتژی مجازی 6.9x":
         await strategy69_cmd(update, context)
