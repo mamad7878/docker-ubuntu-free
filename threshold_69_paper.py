@@ -179,6 +179,44 @@ def balance_lines(bankroll, active, cycle_losses):
     return "\n".join(lines)
 
 
+
+def history_lines(con):
+    """Calculate streak and win-rate statistics from recorded virtual games."""
+    rows = con.execute(
+        "SELECT outcome FROM strategy69_games ORDER BY game_id ASC"
+    ).fetchall()
+
+    wins = sum(outcome == "win" for (outcome,) in rows)
+    losses = sum(outcome == "loss" for (outcome,) in rows)
+    total = wins + losses
+    rate = wins * 100.0 / total if total else 0.0
+
+    cw = cl = mw = ml = 0
+    for (outcome,) in rows:
+        if outcome == "win":
+            cw += 1
+            cl = 0
+            mw = max(mw, cw)
+        elif outcome == "loss":
+            cl += 1
+            cw = 0
+            ml = max(ml, cl)
+        else:
+            cw = cl = 0
+
+    return "\n".join([
+        "📚 سابقه شرط‌بندی مجازی",
+        f"🎯 تعداد کل شرط‌ها: {total:,}",
+        f"✅ تعداد بردها: {wins:,}",
+        f"❌ تعداد باخت‌ها: {losses:,}",
+        f"📊 درصد برد: {rate:.2f}%",
+        f"🔥 بردهای متوالی فعلی: {cw}",
+        f"💔 باخت‌های متوالی فعلی: {cl}",
+        f"🏆 بیشترین برد متوالی: {mw}",
+        f"📉 بیشترین باخت متوالی: {ml}",
+    ])
+
+
 def start_or_status(crash_db=None):
     """
     First press starts a fresh forward-only test at the current latest ID.
@@ -258,6 +296,7 @@ def start_or_status(crash_db=None):
             "🧪 وضعیت استراتژی 6.9x\n\n"
             f"🚦 وضعیت: {state_text}\n"
             f"{balance_lines(bankroll, bool(active), cycle_losses)}\n"
+            f"{history_lines(con)}\n\n"
             f"📍 آخرین بازی پردازش‌شده: {int(last_id)}\n\n"
             "برای جلوگیری از پاک شدن سابقه، "
             "فشردن دوباره دکمه سرمایه را ریست نمی‌کند."
